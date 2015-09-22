@@ -35,28 +35,58 @@ preferences {
 }
 
 def conditionTypes(){[
+	"SunriseSunset":"Sunrise and Sunset",
     "Switch":"Switches",
-    "Presence Sensor":"People Come and Go"
+    "Presence Sensor":"People (presence)"
+]}
+
+def conditionTypeAttributes(){[
+	"Switch":"switch",
+    "Presence Sensor":"presence"
+]}
+
+def conditionScopes(){[
+all:"All",
+any:"Any"
 ]}
 
 def switchConditions(){[
-    "stateOn":"Currently On",
-    "stateOff":"Currently Off",
-    "actionOn":"Turned On",
-    "actionOff":"Turned Off",
-    "actionToggled":"Changed"
+    "state-on":"Are Currently On",
+    "state-off":"Are Currently Off",
+    "action-on":"Are Turned On",
+    "action-off":"Are Turned Off"
 ]}
 
 def presenceConditions(){[
-    "actionAnyArrived":"Any have Arrived",
-    "actionAnyLeft":"Any have Left",
-    "actionAllArrived":"All have Arrived",
-    "actionAllLeft":"All have Left",
-    "stateAnyPresent":"Any are Present",
-    "stateAnyAbsent":"Any are Absent",
-    "stateAllPresent":"All are Present",
-    "stateAllAbsent":"All are Absent"
+    "action-present":"Have Arrived",
+    "action-not present":"Have Left",
+    "state-present":"Are Present",
+    "state-not present":"Are Absent"
 ]}
+
+def sunriseSunsetConditionFilter(){[
+    "action":"When It's",
+    "state":"If It's"
+]}
+
+def sunriseSunsetScopes(){[	
+	before:"Before",
+    after:"After"
+]}
+
+def sunriseSunsetConditions(conditionId){
+def scope = settings."condition_${conditionId}_Filter"
+if (scope=="action")
+return [
+    "action-sunrise":"Sunrise",
+    "action-sunset":"Sunset"
+]
+if (scope=="state")
+return [
+	"state-sunrise":"Sunrise",
+    "state-sunset":"Sunset"
+]
+}
 
 def actionTypes(){[
     "Switch":"Switches",
@@ -78,15 +108,18 @@ def notifyActions(){[
 def buildConditionTitle(conditionId){
 	def conditionType = settings."condition_${conditionId}_Type"
     def conditionValue = settings."condition_${conditionId}_Value"
+    def conditionScope = settings."condition_${conditionId}_Scope"
     
     if(!isConditionComplete(conditionId)) return "Please Configure"
     
     switch(conditionType){
         case "Switch":
-        return conditionTypes()[conditionType]+" are "+switchConditions()[conditionValue]
+        return conditionScopes()[conditionScope]+" "+conditionTypes()[conditionType]+" "+switchConditions()[conditionValue]
         break
         case "Presence Sensor":
-        return presenceConditions()[conditionValue]
+        return conditionScopes()[conditionScope]+" "+conditionTypes()[conditionType]+" "+presenceConditions()[conditionValue]
+        default:
+        return "Missing Condition Label"
         break
     }
 }
@@ -135,16 +168,34 @@ def isConditionComplete(conditionId){
 	
 	def conditionType = settings."condition_${conditionId}_Type"
     def conditionValue = settings."condition_${conditionId}_Value"
-    def conditionDevices = settings."condition_${conditionId}_Devices"
-    
     log.debug "conditionType:${conditionType}"
     log.debug "conditionValue:${conditionValue}"
-    log.debug "conditionDevices:${conditionDevices}"
-    
     if(!conditionType)return false;
     if(!conditionValue)return false;
-    if(!conditionDevices)return false;
-   	if(!conditionDevices[0].hasCapability(conditionType))return false;
+    
+    switch(conditionType){
+    	case "Switch":
+        case "Presence Sensor":
+        	def conditionScope = settings."condition_${conditionId}_Scope"
+    		def conditionDevices = settings."condition_${conditionId}_Devices"
+    		log.debug "conditionDevices:${conditionDevices}"
+    		
+            if(!conditionDevices)return false;
+            if(!conditionScope)return false;
+            if(!conditionDevices[0].hasCapability(conditionType))return false;
+        
+        break
+        case "SunriseSunset":
+        	def conditionScope = settings."condition_${conditionId}_Scope"
+            def conditionOffset = settings."condition_${conditionId}_Offset"
+            def conditionFilter = settings."condition_${conditionId}_Filter"
+            if(!conditionOffset)return false;
+            if(!conditionFilter)return false;
+            if(!conditionScope)return false;
+        break
+        default:
+        return false
+    }
     
     log.debug "isConditionComplete(${conditionId})=true"
     
@@ -257,14 +308,24 @@ def conditionPage(params) {
         switch(settings."condition_${conditionId}_Type"){
         	case "Switch":
             section(){
-            	input "condition_${conditionId}_Devices", "capability.switch", required:true, multiple:true, title: "When which Switches?"
+            	input "condition_${conditionId}_Scope", "enum", required:true, title: "Any or All?", options:conditionScopes()
+                input "condition_${conditionId}_Devices", "capability.switch", required:true, multiple:true, title: "Of these Switches?"
                 input "condition_${conditionId}_Value", "enum", required:true, title: "Are?", options:switchConditions()
             }
             break
             case "Presence Sensor":
             section(){
-            	input "condition_${conditionId}_Devices", "capability.presenceSensor", required:true, multiple:true, title:"Which People?"
-                input "condition_${conditionId}_Value", "enum", required:true, title: "Come and Go How?", options:presenceConditions()
+            	input "condition_${conditionId}_Scope", "enum", required:true, title: "Any or All?", options:conditionScopes()
+                input "condition_${conditionId}_Devices", "capability.presenceSensor", required:true, multiple:true, title:"Of these People?"
+                input "condition_${conditionId}_Value", "enum", required:true, title: "Are?", options:presenceConditions()
+            }
+            break
+            case "SunriseSunset":
+            section(){
+            	input "condition_${conditionId}_Filter", "enum", submitOnChange:true, required:true, title: "When or If?", options:sunriseSunsetConditionFilter()
+                input "condition_${conditionId}_Offset", "number", submitOnChange:true, required:true, title: "Minutes?"
+                input "condition_${conditionId}_Scope", "enum", submitOnChange:true, required:true, title: "Before or After?", options:sunriseSunsetScopes()
+                input "condition_${conditionId}_Value", "enum", required:true, title: "Sunrise or Senset?", options:sunriseSunsetConditions(conditionId)
             }
             break
         }
@@ -363,7 +424,147 @@ def updated() {
 }
 
 def initialize() {
-	// TODO: subscribe to attributes, devices, locations, etc.
+    if(state.conditions && state.conditions.size()>0){
+     for (conditionId in state.conditions) {
+     	if(isConditionComplete(conditionId)){
+        	def conditionValue = settings."condition_${conditionId}_Value"
+            def conditionDevices = settings."condition_${conditionId}_Devices"
+            
+            if(conditionValue.startsWith("action")){
+            	def conditionType = settings."condition_${conditionId}_Type"
+            	def conditionTypeAttribute = conditionTypeAttributes()[conditionType]
+                def conditionTypeAttributeState = conditionValue.replace("action-","")
+                def eventKey = conditionTypeAttribute+"."+conditionTypeAttributeState
+                log.debug "subscribing=${eventKey}"
+            	subscribe(conditionDevices, eventKey, stateChangeHandler)
+            }
+        }
+     }
+    }
 }
 
-// TODO: implement event handlers
+def stateChangeHandler(evt) {
+    log.debug "stateChangeHandler(${evt.value})"
+    if(checkConditionsPass()){
+    	log.debug "conditions pass: executing action"
+        executeActions()
+    }
+}
+
+def checkConditionsPass(){
+	if(state.conditions && state.conditions.size()>0){
+     for (conditionId in state.conditions) {
+     	if(isConditionComplete(conditionId)){
+        	def conditionType = settings."condition_${conditionId}_Type"
+            switch(conditionType){
+            	case "Switch":
+                case "Presence Sensor":
+                	if(!checkDeviceStateConditionPass(conditionId))return false
+                break
+            }
+       }
+     }
+     return true
+   }
+   return false
+}
+
+def checkDeviceStateConditionPass(conditionId){
+	log.debug "checkSwitchConditionPass(${conditionId})"
+	def conditionType = settings."condition_${conditionId}_Type"
+    def conditionScope = settings."condition_${conditionId}_Scope"
+    def conditionValue = settings."condition_${conditionId}_Value"
+    def conditionDevices = settings."condition_${conditionId}_Devices"           
+    def conditionTypeAttribute = conditionTypeAttributes()[conditionType]
+    def conditionTypeAttributeState = conditionValue.replace("action-","")
+    conditionTypeAttributeState = conditionTypeAttributeState.replace("state-","")
+    switch(conditionScope){
+    	case "any":
+        	return anyDevicesMatchAttributeState(conditionDevices,conditionTypeAttribute,conditionTypeAttributeState)
+        break;
+        case "all":
+        	return allDevicesMatchAttributeState(conditionDevices,conditionTypeAttribute,conditionTypeAttributeState)
+        break;
+    }
+    return false;
+
+}
+
+def anyDevicesMatchAttributeState(devices,attributeName,attributeValue){
+	log.debug "anyDevicesMatchAttributeState(${devices},${attributeName},${attributeValue})"
+	for(device in devices){
+    	if(device.currentValue(attributeName).equals(attributeValue))return true;
+    }
+    return false;
+}
+
+def allDevicesMatchAttributeState(devices,attributeName,attributeValue){
+	log.debug "allDevicesMatchAttributeState(${devices},${attributeName},${attributeValue})"
+	for(device in devices){
+    	if(!device.currentValue(attributeName).equals(attributeValue))return false;
+    }
+    return true;
+}
+
+def executeActions(){
+	if(state.actions && state.actions.size()>0){
+     for (actionId in state.actions) {
+     	if(isActionComplete(actionId)){
+        	def actionType = settings."action_${actionId}_Type"
+    		switch(actionType){
+            	case "Switch":
+                	def actionValue = settings."action_${actionId}_Value"
+            		def actionDevices = settings."action_${actionId}_Devices"
+                    executeDevicesCommand(actionDevices,actionValue,null)
+                break
+                case "Notify":
+                	def message = "some conditions were met"
+                    def actionValue = settings."action_${actionId}_Value"
+                    def phone = settings."action_${actionId}_Phone"
+                	executeNotification(actionValue, phone, message)
+                break;
+            }
+        }
+     }
+   }
+}
+
+def executeDevicesCommand(devices,command, arguments){
+	devices.each{
+    	executeDeviceCommand(it,command,arguments)
+    }
+}
+
+def isToggleable(device){
+	if(device.hasCapability("Switch")) return true
+    if(device.hasCapability("Door Control")) return true
+    return false
+}
+
+def nextToggleCommand(device){
+	if(device.hasCapability("Switch")){
+		def value = device.currentValue("switch")
+        return value=="on"?"off":"on"    
+    }else if(device.hasCapability("Door Control")){
+		def value = device.currentValue("door")
+        if(value=="closed" || value=="closing") return "open"
+        else return "close"
+    }
+
+}
+
+def executeDeviceCommand(device,command,arguments){
+	if(command=="toggle" && !device.hasCommand("toggle") && isToggleable(device)){
+       command = nextToggleCommand(device)
+    }
+
+    if(arguments==null){
+        device."$command"()
+    }else{
+        device."$command"(*arguments)
+    }
+}
+
+def executeNotification(type, phone, message){
+	sendNotification(message,[method:type,phone:phone])
+}
