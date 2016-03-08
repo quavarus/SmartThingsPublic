@@ -77,14 +77,14 @@ def actionPage(params) {
 	dynamicPage(name:"actionPage", title: "When ${buttonName(buttonId)} is ${buttonAction}") {
 		section("Lights") {
 			lights.each {light ->
-				input "onoff_${buttonId}_${buttonAction}_${light.id}", "enum", title: light.displayName, options: ["Toggle","On","Off"]
+				input "onoff_${buttonId}_${buttonAction}_${light.id}", "enum", title: light.displayName, options: ["No Action","Toggle","On","Off"], description:"No Action", required: false
 			}
 		}
 
 		section("Dimmers") {
 			lights.each {light ->
 				if (state.lightCapabilities[light.id] in ["level", "color"]) {
-					input "level_${buttonId}_${buttonAction}_${light.id}", "enum", title: light.displayName, options: levels, description: "", required: false
+					input "level_${buttonId}_${buttonAction}_${light.id}", "enum", title: light.displayName, options: levels, description: "No Action", required: false
 				}
 			}
 		}
@@ -92,7 +92,7 @@ def actionPage(params) {
 		section("Colors (hue/saturation)") {
 			lights.each {light ->
 				if (state.lightCapabilities[light.id] == "color") {
-					input "color_${buttonId}_${buttonAction}_${light.id}", "text", title: light.displayName, description: "", required: false
+					input "color_${buttonId}_${buttonAction}_${light.id}", "text", title: light.displayName, description: "No Action", required: false
 				}
 			}
 		}
@@ -325,6 +325,7 @@ private getDeviceCapabilities() {
 
 private getLevels() {
 	def levels = []
+    levels << "No Action"
 	for (int i = 0; i <= 100; i += 5) {
 		levels << "$i%"
 	}

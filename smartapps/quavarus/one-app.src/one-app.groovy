@@ -18,7 +18,7 @@ definition(
     namespace: "quavarus",
     author: "Joshua Henry",
     description: "One App to rule them all.",
-    category: "My Apps",
+    category: "Safety & Security",
     iconUrl: "https://s3.amazonaws.com/smartapp-icons/Convenience/Cat-Convenience.png",
     iconX2Url: "https://s3.amazonaws.com/smartapp-icons/Convenience/Cat-Convenience@2x.png",
     iconX3Url: "https://s3.amazonaws.com/smartapp-icons/Convenience/Cat-Convenience@2x.png")
@@ -118,6 +118,10 @@ def buildConditionTitle(conditionId){
         break
         case "Presence Sensor":
         return conditionScopes()[conditionScope]+" "+conditionTypes()[conditionType]+" "+presenceConditions()[conditionValue]
+        case "SunriseSunset":
+        def conditionFilter = settings."condition_${conditionId}_Filter"
+        def conditionOffset = settings."condition_${conditionId}_Offset"
+        return sunriseSunsetConditionFilter()[conditionFilter]+" "+conditionOffset+" Mins "+sunriseSunsetScopes()[conditionScope]+" "+sunriseSunsetConditions(conditionId)[conditionValue]
         default:
         return "Missing Condition Label"
         break
@@ -240,6 +244,8 @@ log.debug "isActionComplete(${actionId})"
     //validate special actions
     if(actionType=="Notify"){
     	if(!notifyActions().containsKey(actionValue))return false;
+        def notifyMessage = settings."action_${actionId}_Message"
+        if(!notifyMessage) return false
         if(["sms","both"].contains(actionValue)){
         	def notifyPhone = settings."action_${actionId}_Phone"
             if(!notifyPhone)return false;
@@ -325,7 +331,7 @@ def conditionPage(params) {
             	input "condition_${conditionId}_Filter", "enum", submitOnChange:true, required:true, title: "When or If?", options:sunriseSunsetConditionFilter()
                 input "condition_${conditionId}_Offset", "number", submitOnChange:true, required:true, title: "Minutes?"
                 input "condition_${conditionId}_Scope", "enum", submitOnChange:true, required:true, title: "Before or After?", options:sunriseSunsetScopes()
-                input "condition_${conditionId}_Value", "enum", required:true, title: "Sunrise or Senset?", options:sunriseSunsetConditions(conditionId)
+                input "condition_${conditionId}_Value", "enum", required:true, title: "Sunrise or Sunset?", options:sunriseSunsetConditions(conditionId)
             }
             break
         }
@@ -392,6 +398,7 @@ def actionPage(params) {
                 if(["sms","both"].contains(settings."action_${actionId}_Value")){
                 	input "action_${actionId}_Phone", "phone", required:true, title: "Phone Number?"                
                 }
+                input "action_${actionId}_Message", "text", required:true, title: "Message?"  
             }
             break
         }
@@ -420,6 +427,7 @@ def updated() {
 	log.debug "Updated with settings: ${settings}"
 
 	unsubscribe()
+    unschedule()
 	initialize()
 }
 
@@ -427,20 +435,79 @@ def initialize() {
     if(state.conditions && state.conditions.size()>0){
      for (conditionId in state.conditions) {
      	if(isConditionComplete(conditionId)){
+        	def conditionType = settings."condition_${conditionId}_Type"
         	def conditionValue = settings."condition_${conditionId}_Value"
-            def conditionDevices = settings."condition_${conditionId}_Devices"
-            
             if(conditionValue.startsWith("action")){
-            	def conditionType = settings."condition_${conditionId}_Type"
-            	def conditionTypeAttribute = conditionTypeAttributes()[conditionType]
-                def conditionTypeAttributeState = conditionValue.replace("action-","")
-                def eventKey = conditionTypeAttribute+"."+conditionTypeAttributeState
-                log.debug "subscribing=${eventKey}"
-            	subscribe(conditionDevices, eventKey, stateChangeHandler)
+            	switch(conditionType){
+                    case "Switch":
+                    case "Presence Sensor":
+                        def conditionDevices = settings."condition_${conditionId}_Devices"
+                        def conditionTypeAttribute = conditionTypeAttributes()[conditionType]
+                        def conditionTypeAttributeState = conditionValue.replace("action-","")
+                        def eventKey = conditionTypeAttribute+"."+conditionTypeAttributeState
+                        log.debug "subscribing=${eventKey}"
+                        subscribe(conditionDevices, eventKey, stateChangeHandler)
+                    break
+                    case "SunriseSunset":
+                    	 def conditionTypeAttributeState = conditionValue.replace("action-","")
+                         if(conditionTypeAttributeState=="sunrise"){
+                             def eventKey = conditionTypeAttributeState+"Time"
+                             subscribe(location, eventKey, sunriseTimeHandler)
+                             scheduleTurnOn(conditionTypeAttributeState, location.currentValue(eventKey))
+                         }else if (conditionTypeAttributeState=="sunset"){
+                         	def eventKey = conditionTypeAttributeState+"Time"
+                             subscribe(location, eventKey, sunsetTimeHandler)
+                             scheduleTurnOn(conditionTypeAttributeState, location.currentValue(eventKey))
+                         }else{
+                         	log.error "unknown SunriseSunset action ${conditionTypeAttributeState}"
+                         }
+                         
+                    break
+                }
             }
         }
      }
     }
+}
+
+def sunsetTimeHandler(evt) {
+    scheduleTurnOn("sunset",evt.value)
+}
+
+def sunriseTimeHandler(evt) {
+    scheduleTurnOn("sunrise",evt.value)
+}
+
+def scheduleTurnOn(timeOfDay, sunsetString) {
+    //get the Date value for the string
+    def actualTime = Date.parse("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", sunsetString)
+    
+    if(state.conditions && state.conditions.size()>0){
+     for (conditionId in state.conditions) {
+     	if(isConditionComplete(conditionId)){
+        	def conditionType = settings."condition_${conditionId}_Type"
+            if(conditionType=="SunriseSunset"){
+            	def conditionValue = settings."condition_${conditionId}_Value"
+                if(conditionValue.startsWith("action-")){
+                	conditionValue = conditionValue.replace("action-","")
+                    if(conditionValue==timeOfDay){
+                    	def conditionScope = settings."condition_${conditionId}_Scope"
+                        def conditionOffset = settings."condition_${conditionId}_Offset"
+                        conditionOffset = conditionOffset*60*1000
+                        if(conditionScope=="before"){
+                        	conditionOffset = conditionOffset*-1
+                        }
+                        def offsetTime = new Date(actualTime.time + conditionOffset)
+                        log.debug "Scheduling for: $offsetTime (actual is $actualTime)"
+                        runOnce(offsetTime, stateChangeHandler)
+                    }
+                }
+            }
+        }
+     }
+   }
+    
+
 }
 
 def stateChangeHandler(evt) {
@@ -460,6 +527,9 @@ def checkConditionsPass(){
             	case "Switch":
                 case "Presence Sensor":
                 	if(!checkDeviceStateConditionPass(conditionId))return false
+                break
+                case "SunriseSunset":
+                	if(!checkSunriseSunsetConditionPass(conditionId))return false
                 break
             }
        }
@@ -506,6 +576,47 @@ def allDevicesMatchAttributeState(devices,attributeName,attributeValue){
     return true;
 }
 
+def checkSunriseSunsetConditionPass(conditionId){
+	log.debug "checkSunriseSunsetConditionPass(${conditionId})"
+	def conditionType = settings."condition_${conditionId}_Type"
+    def conditionScope = settings."condition_${conditionId}_Scope"
+    def conditionValue = settings."condition_${conditionId}_Value"
+    def conditionOffset = settings."condition_${conditionId}_Offset"           
+	
+    log.debug "checking - "+buildConditionTitle(conditionId)
+
+    def timeOfDay = conditionValue.replace("action-","")
+    timeOfDay = timeOfDay.replace("state-","")
+    log.debug "timeOfDay $timeOfDay"
+    
+    //def sunsetTime = Date.parse("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", location.currentValue("sunsetTime"))
+    //def sunriseTime = Date.parse("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", location.currentValue("sunriseTime"))
+    def sunriseAndSunset = getSunriseAndSunset();
+    def sunsetTime = sunriseAndSunset.sunset
+    def sunriseTime = sunriseAndSunset.sunrise
+    log.debug "ss $sunriseAndSunset"
+    def offset = conditionOffset*60*1000
+    if(conditionScope=="before")
+    	offset=offset*-1
+        
+    //log.debug "sunrise: $sunriseTime"
+    //log.debug "sunset: $sunsetTime"
+        
+    def offsetTime;
+    if(timeOfDay=="sunrise"){
+    	offsetTime = new Date(sunriseTime.time+offset)
+        log.debug "offsetTime: $offsetTime"
+        log.debug "nowTime: ${new Date(now())}"
+        return (now()>offsetTime.time && now() < sunsetTime.time)
+    }else{
+    	offsetTime = new Date(sunsetTime.time+offset)
+        log.debug "offsetTime: $offsetTime"
+        log.debug "nowTime: ${new Date(now())}"
+        return (now()>offsetTime.time && now() < sunriseTime.time)
+    }
+    
+}
+
 def executeActions(){
 	if(state.actions && state.actions.size()>0){
      for (actionId in state.actions) {
@@ -518,7 +629,7 @@ def executeActions(){
                     executeDevicesCommand(actionDevices,actionValue,null)
                 break
                 case "Notify":
-                	def message = "some conditions were met"
+                	def message = settings."action_${actionId}_Message"
                     def actionValue = settings."action_${actionId}_Value"
                     def phone = settings."action_${actionId}_Phone"
                 	executeNotification(actionValue, phone, message)
