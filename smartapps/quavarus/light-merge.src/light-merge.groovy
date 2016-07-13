@@ -167,7 +167,7 @@ def masterChangeHandler(evt){
         //if(changed)return;
         return
     }else{
-    	refresh()
+    	if(evt.name=="switch")refresh();
     }
 	
 }
