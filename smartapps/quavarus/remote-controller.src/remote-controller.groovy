@@ -35,11 +35,11 @@ preferences {
         }
     
 		section("Use the buttons on this remote") {
-			input "remote", "capability.button", required: true, title: "Remote"
+			input "remote", "capability.button", multiple: true, required: true, title: "Remote"
             input "buttonCount", "number", required: true, title: "How many buttons does it have?"
 		}
 		section("To control these lights") {
-			input "lights", "capability.switch", multiple: true, required: false, title: "Lights, switches & dimmers"
+			input "lights", "capability.switch", multiple: true, required: true, title: "Lights, switches & dimmers"
 		}
 	}
 	page(name: "buttonsPage", title: "Buttons", install: true, uninstall: true)
