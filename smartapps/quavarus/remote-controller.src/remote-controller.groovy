@@ -299,6 +299,7 @@ private restoreStates(buttonId, buttonAction) {
 
 private switchLevel(buttonId,action, light) {
 	def percent = settings."level_${buttonId}_${action}_${light.id}"
+    if (percent=="No Action") percent = null;
 	if (percent) {
 		percent[0..-2].toInteger()
 	}

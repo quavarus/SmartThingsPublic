@@ -27,12 +27,14 @@ definition(
 preferences {
 	page(name: "mainPage", title: "Conditions and Actions", install:true, uninstall: true)
     page(name: "conditionsPage", title: "When these are true...", install: false, uninstall: false, previousPage: "mainPage")
+    page(name: "newConditionPage", title: "Condition", install: false, uninstall: false, previousPage: "conditionsPage")
     page(name: "conditionPage", title: "Condition", install: false, uninstall: false, previousPage: "conditionsPage")
     page(name: "testConditionsPage", title: "Test Conditions", install: false, uninstall: false, previousPage: "conditionsPage")
     page(name: "deleteConditionPage", title: "", install: false, uninstall: false, previousPage: "conditionsPage")
     page(name: "actionsPage", title: "Do these...", install: false, uninstall: false, previousPage: "mainPage")
     page(name: "testActionsPage", title: "Do Actions", install: false, uninstall: false, previousPage: "actionsPage")
-    page(name: "actionPage", title: "Action", install: false, uninstall: false, previousPage: "mainPage")
+    page(name: "actionPage", title: "Action", install: false, uninstall: false, previousPage: "actionsPage")
+    page(name: "newActionPage", title: "Action", install: false, uninstall: false, previousPage: "actionsPage")
     page(name: "deleteActionPage", title: "", install: false, uninstall: false, previousPage: "actionsPage")
 }
 
@@ -73,7 +75,6 @@ def modeConditions(){[
     "action-is":"Is Changed And",
     "action-isNot":"Is Changed And Not"
 ]}
-
 
 def sunriseSunsetConditionFilter(){[
     "action":"When It's",
@@ -337,7 +338,14 @@ def buildConditionTitle(conditionId){
         return conditionScopes()[conditionScope]+" "+conditionTypes()[conditionType]+" "+presenceConditions()[conditionValue]
         case "TimeOfDay":
         def conditionFilter = settings."condition_${conditionId}_Filter"
-        def label = sunriseSunsetConditionFilter()[conditionFilter]+" "+sunriseSunsetConditions(conditionId)[conditionValue]
+        def label = sunriseSunsetConditionFilter()[conditionFilter]
+        if(conditionFilter=="action"){
+        	 def conditionOffset = settings."condition_${conditionId}_Offset"
+             if(conditionOffset && conditionOffset.isNumber()){
+             	label+=" "+Math.abs(conditionOffset)+" Minutes "+(conditionOffset<0? "Before" : "After")
+             }
+        }
+        label+=" "+sunriseSunsetConditions(conditionId)[conditionValue]
         if(conditionFilter=="state"){
         	label+=" And "+sunriseSunsetConditions(conditionId)[conditionScope]
         }
@@ -351,18 +359,24 @@ def buildConditionTitle(conditionId){
 def buildActionTitle(actionId){
 	def actionType = settings."action_${actionId}_Type"
     def actionValue = settings."action_${actionId}_Value"
+    def actionDelay = settings."action_${actionId}_Delay"
     
     if(!isActionComplete(actionId)) return "Please Configure"
     
+    def delayLabel=""
+    if(actionDelay && actionDelay.isNumber()){
+    	delayLabel = "After ${actionDelay} Seconds "
+    }
+    
     switch(actionType){
         case "Switch":
-        return switchActions()[actionValue]+" "+actionTypes()[actionType]
+        return delayLabel+switchActions()[actionValue]+" "+actionTypes()[actionType]
         break
         case "Notify":
-        return notifyActions()[actionValue]
+        return delayLabel+notifyActions()[actionValue]
         break
         case "Run":
-        return "${actionType} ${actionValue}"
+        return delayLabel+"${actionType} ${actionValue}"
         break
         default:
         return "Missing Action Label"
@@ -442,6 +456,9 @@ def newConditionId(){
 }
 
 def newActionId(){
+    if(state.unusedActions && state.unusedActions.size()>0){
+    	return state.unusedActions.remove(0);
+    }
     now()+""
 }
 
@@ -460,10 +477,15 @@ log.debug "isActionComplete(${actionId})"
 	
 	def actionType = settings."action_${actionId}_Type"
     def actionValue = settings."action_${actionId}_Value"
+    def actionDelay = settings."action_${actionId}_Delay"
        
     log.debug "actionType:${actionType}"
     log.debug "actionValue:${actionValue}"
+    log.debug "actionDelay:${actionDelay}"
    
+    if(actionDelay){
+    	if(!actionDelay.isNumber()||actionDelay<0) return false;
+    }
    	if(!actionType)return false;
     if(!actionValue)return false;
     
@@ -531,10 +553,9 @@ def conditionsPage(params){
             }
 		}
         section(){
-        	def newId = newConditionId()
-			href(name: "toAddCondition${newId}", page: "conditionPage", title: "Add Condition", params: [conditionId:newId], description: "", state: (areTriggerConditionsDefined() ? "complete" : "incomplete"))
+        	href(name: "toAddCondition", page: "newConditionPage", title: "Add Condition", params:[], description: "", state: (areTriggerConditionsDefined() ? "complete" : "incomplete"))
         }
-        section(){
+        section("Test"){
         	href(name: "toTestConditions", page: "testConditionsPage", title: "Test Conditions", params: [], description: "", state: "complete")
         }
     }
@@ -571,6 +592,11 @@ def testConditionsPage(params){
         	paragraph "Conditions Pass ${checkConditionsPass()}"
         }
     }
+}
+
+def newConditionPage(params){
+	def newId = newConditionId()
+ 	conditionPage([conditionId:newId])
 }
 
 def conditionPage(params) {
@@ -611,8 +637,9 @@ def conditionPage(params) {
             case "TimeOfDay":
             section(){
             	input "condition_${conditionId}_Filter", "enum", submitOnChange:true, required:true, title: "When or If?", options:sunriseSunsetConditionFilter()
-            //    input "condition_${conditionId}_Offset", "number", submitOnChange:true, required:true, title: "Minutes?"
              //   input "condition_${conditionId}_Scope", "enum", submitOnChange:true, required:true, title: "Before or After?", options:sunriseSunsetScopes()
+                if((settings."condition_${conditionId}_Filter")=="action")
+                  input "condition_${conditionId}_Offset", "number", submitOnChange:true, required:false, title: "Minutes Before/After?"
                 input "condition_${conditionId}_Value", "enum", required:true, title: "Time?", options:sunriseSunsetConditions(conditionId)
                 if((settings."condition_${conditionId}_Filter")=="state"){
                 	input "condition_${conditionId}_Scope", "enum", required:true, title: "And?", options:sunriseSunsetConditions(conditionId)
@@ -627,7 +654,7 @@ def conditionPage(params) {
             break
         }
         
-        section(){
+        section("Delete"){
         	  href(name: "toDeleteCondition${conditionId}", page: "deleteConditionPage", title: "Delete", params: [conditionId:conditionId], description: "")
         }
 	}
@@ -672,10 +699,9 @@ def actionsPage(params){
             }
 		}
         section(){
-        	def newId = newActionId()
-        	href(name: "toAddAction", page: "actionPage", title: "Add Action", params: [actionId:newId], description: "", state: (areActionsDefined() ? "complete" : "incomplete"))
+        	href(name: "toAddAction", page: "newActionPage", title: "Add Action", params: [], description: "", state: (areActionsDefined() ? "complete" : "incomplete"))
         }
-        section(){
+        section("Test"){
         	href(name: "toTestActions", page: "testActionsPage", title: "Do Actions", params: [], description: "", state: "complete")
         }
     }
@@ -688,6 +714,11 @@ def testActionsPage(params){
         	paragraph "Actions Done"
         }
     }
+}
+
+def newActionPage(params){
+	def newId = newActionId()
+ 	actionPage([actionId:newId])
 }
 
 def actionPage(params) {
@@ -705,6 +736,9 @@ def actionPage(params) {
     
 	dynamicPage(name:"actionPage", title: "Action") {
 		section() {
+        	input "action_${actionId}_Delay", "number", submitOnChange:false, required:false, title: "Run after ? Seconds"
+        }
+        section() {
             input "action_${actionId}_Type", "enum", required:true, title: "What type of action?", submitOnChange:true, options: actionTypes()
         }
         
@@ -713,6 +747,9 @@ def actionPage(params) {
             section(){
             	input "action_${actionId}_Devices", "capability.switch", required:true, multiple:true, title: "Set which Switches?"
                 input "action_${actionId}_Value", "enum", required:true, title: "To?", options:switchActions()
+            }
+            section("Options", hidable:true, hidden:true){
+            	input "action_${actionId}_Force", "bool", defaultValue:false, required:true, title:"Force Update?"
             }
             break
             case "Run":
@@ -731,7 +768,7 @@ def actionPage(params) {
             break
         }
         
-        section(){
+        section("Delete"){
         	  href(name: "toDeleteAction${actionId}", page: "deleteActionPage", title: "Delete", params: [actionId:actionId], description: "")
         }
 	}
@@ -740,14 +777,32 @@ def actionPage(params) {
 def deleteActionPage(params){
 def actionId = params.actionId as String ?: state.lastDisplayedActionId
 state.lastDisplayedActionId = actionId
-state.actions.remove(actionId)
+deleteAction(actionId)
 state.lastDisplayedActionId = null;
 actionsPage()
 }
 
+def deleteAction(actionId){
+	state.actions.remove(actionId)
+    log.debug "${app}"
+    
+    def unusedActions = state.unusedActions
+    if(unusedActions==null){
+    	unusedActions = [];
+    }
+    unusedActions << actionId;
+    log.debug "${unusedActions}"
+    state.unusedActions = unusedActions;
+    
+    app.updateSetting("action_${actionId}_Type", null);
+    app.updateSetting("action_${actionId}_Delay", null);
+    app.updateSetting("action_${actionId}_Message", null);
+    app.updateSetting("action_${actionId}_Value", null);
+    app.updateSetting("action_${actionId}_Devices", null);
+}
+
 def installed() {
 	log.debug "Installed with settings: ${settings}"
-
 	initialize()
 }
 
@@ -781,15 +836,19 @@ def initialize() {
                          if(conditionTypeAttributeState=="sunrise"){
                              def eventKey = conditionTypeAttributeState+"Time"
                              subscribe(location, eventKey, sunriseTimeHandler)
-                             scheduleTurnOn(conditionTypeAttributeState, location.currentValue(eventKey))
+                             def offset = getConditionOffset(conditionId)
+                             scheduleAction(location.currentValue(eventKey),offset)                             
                          }else if (conditionTypeAttributeState=="sunset"){
                          	def eventKey = conditionTypeAttributeState+"Time"
                              subscribe(location, eventKey, sunsetTimeHandler)
-                             scheduleTurnOn(conditionTypeAttributeState, location.currentValue(eventKey))
+                             def offset = getConditionOffset(conditionId)
+                             scheduleAction(location.currentValue(eventKey),offset)         
                          }else if (conditionTypeAttributeState.toInteger()>=0 && conditionTypeAttributeState.toInteger()<2400){
                          	log.debug("actionTime=${conditionTypeAttributeState}")
-                         	 def actionTime = "0 ${conditionTypeAttributeState.drop(2)} ${conditionTypeAttributeState.take(2)} 1/1 * ? *"
-                         	schedule(actionTime,scheduledConditionHandler);
+                            def offset = getConditionOffset(conditionId)
+                            def actionTime = calculateHoursMinutes(conditionTypeAttributeState, offset)
+                         	def cron = "0 ${actionTime[1]} ${actionTime[0]} 1/1 * ? *"
+                         	schedule(cron,scheduledConditionHandler);
                          }else{
                          	log.error "unknown TimeOfDay action ${conditionTypeAttributeState}"
                          }                         
@@ -805,12 +864,45 @@ def initialize() {
     }
 }
 
+def calculateHoursMinutes(time, offset){
+	log.debug "calculateHoursMinutes(time=${time}, offset=${offset})"
+	def hours = time.take(2).toInteger()
+    def minutes = time.drop(2).toInteger()
+    minutes = minutes+(hours*60)
+    minutes += offset
+    if(minutes<0) minutes+=(24*60)
+    hours = (int)minutes/60
+    minutes = minutes-(hours*60)
+    def value = [hours,minutes]
+    log.debug "calculateHoursMinutes(time=${time}, offset=${offset})=${value}"
+    return value
+}
+
 def sunsetTimeHandler(evt) {
     scheduleTurnOn("sunset",evt.value)
 }
 
 def sunriseTimeHandler(evt) {
     scheduleTurnOn("sunrise",evt.value)
+}
+
+def getConditionOffset(conditionId){
+	def conditionOffset = settings."condition_${conditionId}_Offset"
+    if(conditionOffset && conditionOffset.isNumber()){
+        return conditionOffset
+    }
+    return 0
+}
+
+def scheduleAction(timeString,offset){
+	def actualTime = Date.parse("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", timeString)
+    if(actualTime.time>now()){
+        def offsetTime = new Date(actualTime.time + (offset*60*1000))
+        log.debug "Scheduling actions for: $offsetTime (actual is $actualTime)"
+        runOnce(offsetTime, scheduledConditionHandler)
+        return true
+    }
+    return false
 }
 
 def scheduleTurnOn(timeOfDay, sunsetString) {
@@ -826,16 +918,8 @@ def scheduleTurnOn(timeOfDay, sunsetString) {
                 if(conditionValue.startsWith("action-")){
                 	conditionValue = conditionValue.replace("action-","")
                     if(conditionValue==timeOfDay){
-                    	//def conditionScope = settings."condition_${conditionId}_Scope"
-                        def conditionOffset = 0;
-                        //def conditionOffset = settings."condition_${conditionId}_Offset"
-                        //conditionOffset = conditionOffset*60*1000
-                        //if(conditionScope=="before"){
-                        //	conditionOffset = conditionOffset*-1
-                        //}
-                        def offsetTime = new Date(actualTime.time + conditionOffset)
-                        log.debug "Scheduling for: $offsetTime (actual is $actualTime)"
-                        runOnce(offsetTime, stateChangeHandler)
+                        def conditionOffset = getConditionOffset(conditionId);
+                        scheduleAction(sunsetString,conditionOffset)
                     }
                 }
             }
@@ -990,33 +1074,64 @@ def timeOfDayToInteger(timeOfDay){
 def executeActions(){
 	if(state.actions && state.actions.size()>0){
      for (actionId in state.actions) {
-     	if(isActionComplete(actionId)){
-        	def actionType = settings."action_${actionId}_Type"
-    		switch(actionType){
-            	case "Switch":
-                	def actionValue = settings."action_${actionId}_Value"
-            		def actionDevices = settings."action_${actionId}_Devices"
-                    executeDevicesCommand(actionDevices,actionValue,null)
-                break
-                case "Run":
-                	def actionValue = settings."action_${actionId}_Value"
-            		executeRunRoutine(actionValue);
-                break
-                case "Notify":
-                	def message = settings."action_${actionId}_Message"
-                    def actionValue = settings."action_${actionId}_Value"
-                    def phone = settings."action_${actionId}_Phone"
-                	executeNotification(actionValue, phone, message)
-                break;
-            }
+     	def delay = getActionDelay(actionId)
+        if(delay==0){
+        	executeAction(actionId)
+        }else{
+        	runIn(delay,handleScheduledAction,[overwrite:false,data:[actionId:actionId]])
         }
      }
    }
 }
 
-def executeDevicesCommand(devices,command, arguments){
+def handleScheduledAction(data){
+	executeAction(data.actionId)
+}
+
+def getActionDelay(actionId){
+	def delay = settings."action_${actionId}_Delay"
+    if(delay && delay.isNumber() && delay>0){
+        return delay
+    }
+    return 0
+}
+
+def executeAction(actionId){
+	if(isActionComplete(actionId)){
+        def actionType = settings."action_${actionId}_Type"
+        switch(actionType){
+            case "Switch":
+            def actionValue = settings."action_${actionId}_Value"
+            def actionDevices = settings."action_${actionId}_Devices"
+            def actionForce = settings."action_${actionId}_Force"
+            if(actionForce){
+            	executeDevicesCommand(actionDevices,null,actionValue,null)
+            }else{
+            	executeDevicesCommand(actionDevices,switchStateChangeCheck,actionValue,null)
+            }
+            break
+            case "Run":
+            def actionValue = settings."action_${actionId}_Value"
+            executeRunRoutine(actionValue);
+            break
+            case "Notify":
+            def message = settings."action_${actionId}_Message"
+            def actionValue = settings."action_${actionId}_Value"
+            def phone = settings."action_${actionId}_Phone"
+            executeNotification(actionValue, phone, message)
+            break;
+        }
+    }
+}
+
+def switchStateChangeCheck(device, command, arguments){
+	def currentState = device.currentSwitch
+	return currentState!=command;
+}
+
+def executeDevicesCommand(devices,stateChangeCheckFunction,command, arguments){
 	devices.each{
-    	executeDeviceCommand(it,command,arguments)
+    	executeDeviceCommand(it,stateChangeCheckFunction,command,arguments)
     }
 }
 
@@ -1038,15 +1153,65 @@ def nextToggleCommand(device){
 
 }
 
-def executeDeviceCommand(device,command,arguments){
+def lastIndexOfEvent(device, attribute){
+	for(int i=0;i<device.events().size();i++){
+    	def event = device.events()[i]
+        if (event.name && event.name==attribute)
+        	return i
+    }
+    return -1
+}
+
+/**
+* Returns PHYSICAL if device state was changed by a physical button press
+* Returns DIGITAL if a device state was changed by a digital button press
+* Returns the appid if a device state was changed by an smart app
+**/
+def findSource(device,eventIndex){
+	def allowableTimespan = 500
+	def event = device.events()[eventIndex]
+    if (event.isPhysical())return "PHYSICAL"
+	for (int i=(eventIndex+1);i<device.events().size();i++){
+    	def compareEvent = device.events()[i]
+        def timespan = event.date.getTime()-compareEvent.date.getTime()
+        log.debug "timespan=${timespan}"
+        if(timespan<allowableTimespan){
+        	log.debug "source=${compareEvent.source}"
+            def compareSource = compareEvent.source as String
+            log.debug "compare=${compareSource=='APP_COMMAND'}"
+        	if(compareSource=="APP_COMMAND"){
+            	log.debug "found near app command"
+            	if(event.value==compareEvent.value)return compareEvent.installedSmartAppId
+            }
+        }else{
+        	return "DIGITAL"
+        }
+    }
+}
+
+def isLastActor(device, attribute){
+    def lastAttributeChangeIndex = lastIndexOfEvent(device,attribute)
+    def source = findSource(device,lastAttributeChangeIndex)
+	app.id==source
+}
+
+def executeDeviceCommand(device,stateChangeCheckFunction,command,arguments){
+	isLastActor(device,"switch")
 	if(command=="toggle" && !device.hasCommand("toggle") && isToggleable(device)){
        command = nextToggleCommand(device)
     }
-
-    if(arguments==null){
-        device."$command"()
+	def doCommand = true;
+    if(stateChangeCheckFunction){
+    	doCommand = "$stateChangeCheckFunction"(device,command,arguments)
+    }
+    if(doCommand){
+        if(arguments==null){
+            device."$command"()
+        }else{
+            device."$command"(*arguments)
+        }
     }else{
-        device."$command"(*arguments)
+    	log.debug "${device} is already ${command} so skipping "
     }
 }
 

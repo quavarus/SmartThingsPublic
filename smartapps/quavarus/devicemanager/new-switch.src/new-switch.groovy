@@ -1,5 +1,5 @@
 /**
- *  Light Merge
+ *  New Switch
  *
  *  Copyright 2015 Joshua Henry
  *
@@ -14,11 +14,12 @@
  *
  */
 definition(
-    name: "Light Merge",
-    namespace: "quavarus",
+    name: "New Switch",
+    namespace: "quavarus/DeviceManager",
     author: "Joshua Henry",
     description: "Create a virtual light or switch that controls many physical lights or switches",
-    category: "My Apps",
+    category: "Convenience",
+    parent: "quavarus/DeviceManager:Device Manager",
     iconUrl: "https://s3.amazonaws.com/smartapp-icons/Convenience/Cat-Convenience.png",
     iconX2Url: "https://s3.amazonaws.com/smartapp-icons/Convenience/Cat-Convenience@2x.png",
     iconX3Url: "https://s3.amazonaws.com/smartapp-icons/Convenience/Cat-Convenience@2x.png")
@@ -33,21 +34,19 @@ preferences {
 def mainPage(){
 	dynamicPage(name: "mainPage", install:true, uninstall: true){
     	section(){
-    		label title: "Name This Switch", required: true
+    		label title: "Name?", required: true
         }
     
     	section(){
-        	input "switches", "capability.switch", required:false, multiple:true, title:"Add these Switches?", submitOnChange:true
-            input "dimmers", "capability.switchLevel", required:false, multiple:true, title:"Add these Dimmers?", submitOnChange:true
+        	input "switches", "capability.switch", required:true, multiple:true, title:"Switches?", submitOnChange:true
+            if(switches){
+            	input(name: "deviceType", type: "enum", title: "Switch Type?", defaultValue:selectBestDeviceType(), options: ["VirtualDimmer":"Dimmer Switch","VirtualSwitch":"On/Off Switch"])
+            }
         }
         
         section{
         	href(name: "toOptions", page: "optionsPage", title: "Options", description: "", state: "complete")
         }
-        
-        
-        
-        
     }
 }
 
@@ -83,9 +82,8 @@ private updateSetting(name, value) {
 
 def createVirtualDevice(){
 	log.debug "createVirtualDevice()"
-    log.debug location.hubs
-    log.debug location.hubs*.id
-    def deviceType = selectBestDeviceType()
+    log.debug "hubs ${location.hubs}"
+  //  log.debug location.hubs.first()
 	def childDevice = addChildDevice("smartthings", deviceType, "${app.id}-${newUID()}",null,[name:app.label, completedSetup: true])
 
     if (childDevice)
@@ -107,12 +105,15 @@ def updateVirtualDevices(){
 }
 
 def selectBestDeviceType(){
-	log.debug "dimmers $settings.dimmers"
-    log.debug "dimmer count ${settings.dimmers?.size()}"
-    def deviceType=""
-	if (settings.dimmers?.size()>0)
-	deviceType = "VirtualDimmer"
-    else deviceType = "VirtualSwitch"
+	
+    def deviceType="VirtualSwitch"
+    if(switches){
+        for (int i=0; i<switches.size();i++){
+            if(switches[i].hasCapability("Switch Level")){
+                deviceType = "VirtualDimmer"
+            }
+        }
+    }
     deviceType
 }
 
@@ -134,8 +135,7 @@ def updated() {
 
 def initialize() {
 	subscribe(switches, "switch", stateChangeHandler)
-    subscribe(dimmers, "switch", stateChangeHandler)
-    subscribe(dimmers, "level", stateChangeHandler)
+    subscribe(switches, "level", stateChangeHandler)
     subscribe(masters, "switch", masterChangeHandler)
     subscribe(masters, "level", masterChangeHandler)
     
@@ -145,8 +145,8 @@ def initialize() {
 def masterChangeHandler(evt){
 	if(updateMasterToVirtual() && evt.isStateChange()){
     	log.debug "master device changed $evt.name"
-        def remainingDevices = allDevices()
-        remainingDevices.remove(evt.device.id)
+        //def remainingDevices = allDevices()
+        //remainingDevices.remove(evt.device.id)
         log.debug "remainging Devices= $remainingDevices"
         //def changed = false
         
@@ -226,7 +226,7 @@ def updateChildInfo(child){
 
 def countDevicesWithAttribute(attribute){
 	def count = 0
-    def devices = allDevices().values()
+    def devices = settings.switches
 	for(device in devices)
     	if(device.hasAttribute(attribute))count++
     count
@@ -234,7 +234,7 @@ def countDevicesWithAttribute(attribute){
 
 def countDevicesWithAttributeValue(attribute, value){
 	def count = 0
-    def devices = allDevices().values()
+    def devices = settings.switches
 	for(device in devices)
     	if(device.currentValue(attribute)==value)count++
     count
@@ -309,7 +309,7 @@ def isMasterDevice(device){
 
 def allAre(value){
 	log.debug "allAre($value)"
-    for (device in allDevices().values()){
+    for (device in settings.switches){
         if(device.currentSwitch!=value){
             log.debug "device $device is $device.currentSwitch"
             return false
@@ -320,7 +320,7 @@ def allAre(value){
 
 def anyAre(value){
 	log.debug "anyAre($value)"
-    for (device in allDevices().values()){
+    for (device in settings.switches){
         if(device.currentSwitch==value){
             log.debug "device $device is $device.currentSwitch"
             return true
@@ -331,7 +331,7 @@ def anyAre(value){
 }
 
 def on (){
-    def changed = turnPhysicalsOn(allDevices().values())
+    def changed = turnPhysicalsOn(settings.switches)
 	if (!changed)getChildDevices().each{it.sendOnEvent()}
 }
 
@@ -353,7 +353,7 @@ def turnPhysicalsOn(devices){
 }
 
 def off(){
-	def changed = turnPhysicalsOff(allDevices().values())
+	def changed = turnPhysicalsOff(settings.switches)
 	if(!changed)getChildDevices().each{it.sendOffEvent()}
 }
 
@@ -376,8 +376,7 @@ def turnPhysicalsOff(devices){
 
 def setLevel(Integer value){
 	def changed = false;
-    if(settings.dimmers)
-    changed = setPhysicalsLevel(settings.dimmers,value)	
+    changed = setPhysicalsLevel(settings.switches,value)	
     if(changed)
 	getChildDevices().each{it.sendLevelEvent(value)}
 }
@@ -390,11 +389,13 @@ def setLevel(device,Integer value){
 def setPhysicalsLevel(devices,Integer value){
 	def changed = false
 	for(dimmer in devices){
-    	log.debug "dimmer level=$dimmer.currentLevel value=$value equal? ${value == dimmer.currentLevel}"
-        if(value != dimmer.currentLevel){
-        	log.debug "setting level of $dimmer.label to $value"
-            dimmer.setLevel(value)
-            changed = true
+    	if(dimmer.hasCapability("Switch Level")){
+            log.debug "dimmer level=$dimmer.currentLevel value=$value equal? ${value == dimmer.currentLevel}"
+            if(value != dimmer.currentLevel){
+                log.debug "setting level of $dimmer.label to $value"
+                dimmer.setLevel(value)
+                changed = true
+            }
         }
     }
     changed
@@ -406,39 +407,35 @@ def poll(device){
 
 def refresh(device){
 	log.debug "refresh(${device})"
-    allDevices().values().each{it.refresh()}
+    settings.switches.each{it.refresh()}
 }
 
-def allDevices(){
-def devices = [:]
-if(settings.switches)
-settings.switches.each{
-	devices[it.id]=it;
-}
-if(settings.dimmers)
-	settings.dimmers.each{
-    	devices[it.id]=it;
-    }
-return devices
-}
+//def allDevices(){
+//def devices = [:]
+//if(settings.switches)
+//settings.switches.each{
+//	devices[it.id]=it;
+//}
+//return devices
+//}
 
 def setIndicatorStatus(device,value){
 	log.debug "setIndicatorStatus(${device}, ${value})"
     switch(value){
     	case "when on":
-        allDevices().values().each{
+        settings.switches.each{
         	if(it.hasCommand("indicatorWhenOn"))
         	it.indicatorWhenOn()
         }
         break
         case "when off":
-        allDevices().values().each{
+        settings.switches.each{
         	if(it.hasCommand("indicatorWhenOff"))
         	it.indicatorWhenOff()
         }
         break
         case "never":
-        allDevices().values().each{
+        settings.switches.each{
         	if(it.hasCommand("indicatorNever"))
         	it.indicatorNever()
         }
